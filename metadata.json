@@ -1,0 +1,6 @@
+{
+  "name": "Aurora Fit",
+  "description": "A mobile-first offline workout tracker with a dark Aurora + Spatial UI aesthetic. Log workouts, compare previous performance, and track consistency.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
