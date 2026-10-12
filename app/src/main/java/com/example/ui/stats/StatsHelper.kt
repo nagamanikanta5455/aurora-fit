@@ -4,46 +4,47 @@ import com.example.data.model.WorkoutWithExercises
 import java.util.Calendar
 
 object StatsHelper {
-    fun calculateStreak(workouts: List<WorkoutWithExercises>): Int {
-        if (workouts.isEmpty()) return 0
-        val sortedDates = workouts.map {
-            val cal = Calendar.getInstance().apply { timeInMillis = it.workout.dateMillis }
-            cal.set(Calendar.HOUR_OF_DAY, 0)
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-            cal.timeInMillis
-        }.distinct().sortedDescending()
+    fun calculateStreak(
+        workouts: List<WorkoutWithExercises>,
+        restDays: Set<String> = emptySet()
+    ): Int {
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
         
-        var streak = 0
-        var currentExpected = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+        // Collect dates that have completed workouts
+        val workoutDates = workouts.map {
+            dateFormat.format(java.util.Date(it.workout.dateMillis))
+        }.toSet()
 
-        var i = 0
-        // check if today is done, if not, maybe yesterday
-        if (sortedDates.isNotEmpty() && sortedDates[0] == currentExpected) {
-            streak++
-            i++
-            currentExpected -= 24 * 60 * 60 * 1000
-        } else if (sortedDates.isNotEmpty() && sortedDates[0] == currentExpected - 24 * 60 * 60 * 1000) {
-            currentExpected -= 24 * 60 * 60 * 1000
-        } else {
-            return 0
+        // Active days are either workout days or planned rest days
+        val activeDates = workoutDates + restDays
+        if (activeDates.isEmpty()) return 0
+
+        val cal = Calendar.getInstance()
+        val todayStr = dateFormat.format(cal.time)
+
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        val yesterdayStr = dateFormat.format(cal.time)
+
+        // Check if current streak is active today or yesterday
+        val streakActiveFrom: Calendar = when {
+            activeDates.contains(todayStr) -> Calendar.getInstance()
+            activeDates.contains(yesterdayStr) -> Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+            else -> return 0 // Streak broken if neither today nor yesterday has activity/rest day
         }
-        
-        while (i < sortedDates.size) {
-            if (sortedDates[i] == currentExpected) {
+
+        var streak = 0
+        val checkCal = Calendar.getInstance().apply { time = streakActiveFrom.time }
+
+        while (true) {
+            val dateStr = dateFormat.format(checkCal.time)
+            if (activeDates.contains(dateStr)) {
                 streak++
-                currentExpected -= 24 * 60 * 60 * 1000
-                i++
+                checkCal.add(Calendar.DAY_OF_YEAR, -1)
             } else {
                 break
             }
         }
+
         return streak
     }
 

@@ -43,17 +43,12 @@ fun AuroraFitApp(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    val isDark = isSystemInDarkTheme()
-
-    val navContainerColor = if (isDark) Color(0xF00F172A) else Color(0xF5FFFFFF)
-    val navBorderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFCBD5E1).copy(alpha = 0.5f)
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(
                 modifier = Modifier.height(80.dp),
-                containerColor = if (isDark) Color(0xF20F172A) else Color(0xF8FFFFFF),
+                containerColor = Color(0xF20F172A),
                 contentColor = MaterialTheme.colorScheme.primary,
                 tonalElevation = 0.dp
             ) {
@@ -61,8 +56,8 @@ fun AuroraFitApp(viewModel: MainViewModel) {
                     selectedIconColor = ElectricViolet,
                     selectedTextColor = ElectricViolet,
                     indicatorColor = ElectricViolet.copy(alpha = 0.15f),
-                    unselectedIconColor = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
-                    unselectedTextColor = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)
+                    unselectedIconColor = Color(0xFF64748B),
+                    unselectedTextColor = Color(0xFF64748B)
                 )
 
                 NavigationBarItem(

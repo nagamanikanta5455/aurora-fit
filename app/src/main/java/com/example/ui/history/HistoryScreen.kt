@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -102,13 +103,10 @@ fun HistoryScreen(viewModel: MainViewModel) {
     val formattedWorkouts = formatCompactNumber(totalWorkouts)
     val formattedActiveTime = formatDuration(totalDurationSeconds)
 
-    // State for expanding/collapsing timeline beyond top 5
-    var isTimelineExpanded by remember { mutableStateOf(false) }
-    val displayedWorkouts = if (isTimelineExpanded || completedWorkouts.size <= 5) {
-        completedWorkouts
-    } else {
-        completedWorkouts.take(5)
-    }
+    // State for chunked "Load Next 5" pagination
+    var visibleCount by remember { mutableStateOf(5) }
+    val displayedWorkouts = completedWorkouts.take(visibleCount)
+    val remainingCount = (completedWorkouts.size - visibleCount).coerceAtLeast(0)
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -117,9 +115,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    brush = if (isDarkMode) DarkMeshBackgroundGradient else LightMeshBackgroundGradient
-                )
+                .background(brush = DarkMeshBackgroundGradient)
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -219,9 +215,9 @@ fun HistoryScreen(viewModel: MainViewModel) {
                             letterSpacing = 1.5.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        if (completedWorkouts.size > 5) {
+                        if (completedWorkouts.isNotEmpty()) {
                             Text(
-                                if (isTimelineExpanded) "Showing all ${completedWorkouts.size}" else "Showing top 5 of ${completedWorkouts.size}",
+                                "Showing ${displayedWorkouts.size} of ${completedWorkouts.size}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
@@ -240,20 +236,19 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     )
                 }
 
-                // "Show More" / "Show Less" Expand Button
-                if (completedWorkouts.size > 5) {
+                // Chunked "Load Next 5 (X remaining)" continuous pagination button
+                if (remainingCount > 0) {
                     item {
-                        val borderColor = if (isDarkMode) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-
+                        val nextChunk = minOf(5, remainingCount)
                         OutlinedButton(
-                            onClick = { isTimelineExpanded = !isTimelineExpanded },
+                            onClick = { visibleCount += 5 },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp),
                             shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, borderColor),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.primary
+                                contentColor = ElectricViolet
                             )
                         ) {
                             Row(
@@ -261,17 +256,35 @@ fun HistoryScreen(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.Center
                             ) {
                                 Icon(
-                                    imageVector = if (isTimelineExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    imageVector = Icons.Default.KeyboardArrowDown,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = ElectricCyan,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (isTimelineExpanded) "Show Less" else "Show All Workouts (${completedWorkouts.size})",
+                                    text = "Load Next $nextChunk ($remainingCount remaining)",
                                     fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.5.sp
+                                    letterSpacing = 0.5.sp,
+                                    color = Color.White
                                 )
                             }
+                        }
+                    }
+                } else if (completedWorkouts.size > 5) {
+                    item {
+                        TextButton(
+                            onClick = { visibleCount = 5 },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                        ) {
+                            Text(
+                                text = "Collapse to Recent 5",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 }
@@ -346,98 +359,152 @@ fun HistoryStatCard(
 
 @Composable
 fun WeeklyActivityChart(workouts: List<WorkoutWithExercises>) {
-    val daysList = mutableListOf<Pair<String, Int>>()
-    val calendar = Calendar.getInstance()
-    calendar.time = Date()
-    val format = SimpleDateFormat("EEE", Locale.getDefault())
+    val daysList = remember(workouts) {
+        val list = mutableListOf<Triple<String, Int, Int>>() // DayName, SetsCount, WorkoutsCount
+        val calendar = Calendar.getInstance()
+        val format = SimpleDateFormat("EEE", Locale.getDefault())
 
-    val startOfDay = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }
+        val startOfDay = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
 
-    startOfDay.add(Calendar.DAY_OF_YEAR, -6)
+        startOfDay.add(Calendar.DAY_OF_YEAR, -6)
 
-    for (i in 0..6) {
-        val currentDayStart = startOfDay.timeInMillis
-        val currentDayEnd = currentDayStart + (24 * 60 * 60 * 1000) - 1
-        val dayName = format.format(Date(currentDayStart))
-        val setsThatDay = workouts.filter {
-            it.workout.dateMillis in currentDayStart..currentDayEnd
-        }.sumOf { w -> w.exercises.sumOf { e -> e.sets.size } }
-
-        daysList.add(dayName to setsThatDay)
-        startOfDay.add(Calendar.DAY_OF_YEAR, 1)
+        for (i in 0..6) {
+            val currentDayStart = startOfDay.timeInMillis
+            val currentDayEnd = currentDayStart + (24 * 60 * 60 * 1000) - 1
+            val dayName = format.format(Date(currentDayStart))
+            val dayWorkouts = workouts.filter {
+                it.workout.dateMillis in currentDayStart..currentDayEnd
+            }
+            val setsThatDay = dayWorkouts.sumOf { w -> w.exercises.sumOf { e -> e.sets.size } }
+            list.add(Triple(dayName, setsThatDay, dayWorkouts.size))
+            startOfDay.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        list
     }
 
     val maxSets = daysList.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+    val total7DaySets = daysList.sumOf { it.second }
+    val activeDaysCount = daysList.count { it.second > 0 }
 
     GlassCard {
         Column(modifier = Modifier.padding(20.dp)) {
+            // Header: Title & 7-day stats
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "LAST 7 DAYS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Volume breakdown",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
+                Column {
+                    Text(
+                        "WEEKLY ACTIVITY",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "$total7DaySets sets · $activeDaysCount active ${if (activeDaysCount == 1) "day" else "days"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ElectricCyan,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Peak Indicator Badge
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = ElectricViolet.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "Peak: $maxSets sets",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricViolet,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
+            // Chart Canvas Container
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(115.dp),
+                    .height(130.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                daysList.forEach { (day, count) ->
+                daysList.forEachIndexed { index, (day, count, workoutCount) ->
+                    val isToday = index == 6
                     val heightRatio = (count.toFloat() / maxSets.toFloat()).coerceIn(0f, 1f)
-                    val animatedHeight = if (heightRatio > 0f) heightRatio else 0.08f
+                    val activeBarFraction = if (count > 0) heightRatio else 0.06f
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Bottom,
-                        modifier = Modifier.fillMaxHeight()
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
                     ) {
+                        // Data value tooltip on active bars
+                        if (count > 0) {
+                            Text(
+                                text = "$count",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isToday) ElectricCyan else Color.White.copy(alpha = 0.9f)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                        } else {
+                            Spacer(modifier = Modifier.height(18.dp))
+                        }
+
+                        // Glowing Pill-Shaped Modern Bar
                         Box(
                             modifier = Modifier
-                                .width(28.dp)
+                                .width(22.dp)
                                 .weight(1f, fill = false)
-                                .fillMaxHeight(animatedHeight)
+                                .fillMaxHeight(activeBarFraction)
+                                .shadow(
+                                    elevation = if (count > 0) 8.dp else 0.dp,
+                                    shape = RoundedCornerShape(12.dp),
+                                    spotColor = if (isToday) ElectricCyan else ElectricViolet,
+                                    ambientColor = Color.Transparent
+                                )
                                 .background(
-                                    brush = if (count > 0) Brush.verticalGradient(
-                                        listOf(ElectricCyan, ElectricViolet)
-                                    ) else Brush.verticalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                    brush = when {
+                                        count > 0 && isToday -> Brush.verticalGradient(
+                                            listOf(ElectricCyan, ElectricViolet)
                                         )
-                                    ),
-                                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 3.dp, bottomEnd = 3.dp)
+                                        count > 0 -> Brush.verticalGradient(
+                                            listOf(Color(0xFFA78BFA), ElectricViolet)
+                                        )
+                                        else -> Brush.verticalGradient(
+                                            listOf(
+                                                Color(0xFF334155).copy(alpha = 0.4f),
+                                                Color(0xFF1E293B).copy(alpha = 0.3f)
+                                            )
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Day label below bar
                         Text(
-                            day,
+                            text = day,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
+                            color = if (isToday) ElectricCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }

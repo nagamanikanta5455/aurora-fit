@@ -27,9 +27,9 @@ fun GlassCard(
     elevation: Dp = 6.dp,
     content: @Composable () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
-    val containerColor = if (isDark) Color(0x1F1E293B) else Color(0xF0F8FAFC)
-    val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFCBD5E1).copy(alpha = 0.4f)
+    // Unified dark glassmorphic styling
+    val containerColor = Color(0x1F1E293B)
+    val borderColor = Color.White.copy(alpha = 0.1f)
 
     Card(
         modifier = modifier.shadow(

@@ -74,9 +74,7 @@ fun WorkoutScreen(viewModel: MainViewModel, navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    brush = if (isDarkMode) DarkMeshBackgroundGradient else LightMeshBackgroundGradient
-                )
+                .background(brush = DarkMeshBackgroundGradient)
         ) {
             if (activeWorkout == null) {
                 Column(

@@ -18,8 +18,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      val isDarkMode by viewModel.isDarkMode.collectAsState()
-      MyApplicationTheme(darkTheme = isDarkMode) {
+      MyApplicationTheme(darkTheme = true) {
         AuroraFitApp(viewModel)
       }
     }

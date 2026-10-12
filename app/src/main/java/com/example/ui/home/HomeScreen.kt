@@ -51,7 +51,14 @@ import java.util.*
 fun HomeScreen(viewModel: MainViewModel, navController: NavController) {
     val workouts by viewModel.allWorkouts.collectAsState()
     val completedWorkouts = workouts.filter { it.workout.isCompleted }
-    val streak = StatsHelper.calculateStreak(completedWorkouts)
+
+    // Read stored rest days for streak calculation
+    val prefs = remember { Graph.appContext.getSharedPreferences("aurora_prefs", android.content.Context.MODE_PRIVATE) }
+    var restDays by remember {
+        mutableStateOf(prefs.getStringSet("rest_days", emptySet()) ?: emptySet())
+    }
+
+    val streak = StatsHelper.calculateStreak(completedWorkouts, restDays)
     val thisMonth = StatsHelper.workoutsThisMonth(completedWorkouts)
 
     val todayCalendar = Calendar.getInstance()
@@ -62,9 +69,6 @@ fun HomeScreen(viewModel: MainViewModel, navController: NavController) {
                 c.get(Calendar.DAY_OF_YEAR) == todayCalendar.get(Calendar.DAY_OF_YEAR)
     }
 
-    val isDarkMode by viewModel.isDarkMode.collectAsState()
-    val haptic = LocalHapticFeedback.current
-
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -72,49 +76,31 @@ fun HomeScreen(viewModel: MainViewModel, navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    brush = if (isDarkMode) DarkMeshBackgroundGradient else LightMeshBackgroundGradient
-                )
+                .background(brush = DarkMeshBackgroundGradient)
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Header Row
+                // Header Row (Clean branding without theme toggle)
                 item {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            Text(
-                                "AURORA FIT",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                letterSpacing = 2.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                "DASHBOARD",
-                                style = MaterialTheme.typography.headlineLarge,
-                                fontWeight = FontWeight.Light,
-                                letterSpacing = 2.sp,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.toggleTheme()
-                            },
-                            modifier = Modifier.align(Alignment.TopEnd)
-                        ) {
-                            Icon(
-                                imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                contentDescription = "Toggle Theme",
-                                tint = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "AURORA FIT",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 2.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "DASHBOARD",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Light,
+                            letterSpacing = 2.sp,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
                     }
                 }
 
@@ -445,21 +431,40 @@ fun MonthlyProgressCard(completedWorkouts: List<WorkoutWithExercises>) {
     val daysInMonth = displayedMonth.lengthOfMonth()
     val firstDayOffset = displayedMonth.atDay(1).dayOfWeek.value % 7
 
-    val completedDays = remember(completedWorkouts, displayedMonth) {
-        val set = mutableSetOf<Int>()
+    // Map of day of month -> number of completed workouts logged that day
+    val workoutCountByDay = remember(completedWorkouts, displayedMonth) {
+        val map = mutableMapOf<Int, Int>()
         completedWorkouts.forEach {
             val cal = Calendar.getInstance()
             cal.timeInMillis = it.workout.dateMillis
             val wYear = cal.get(Calendar.YEAR)
             val wMonth = cal.get(Calendar.MONTH) + 1
             if (wYear == displayedMonth.year && wMonth == displayedMonth.monthValue) {
-                set.add(cal.get(Calendar.DAY_OF_MONTH))
+                val day = cal.get(Calendar.DAY_OF_MONTH)
+                map[day] = (map[day] ?: 0) + 1
             }
         }
-        set
+        map
     }
 
-    val percentage = if (daysInMonth > 0) (completedDays.size * 100) / daysInMonth else 0
+    val completedDays = workoutCountByDay.keys
+
+    // Mindful Monthly Progress Formula:
+    // Rest days count as valid lifestyle adherence, or are excluded from the required target days
+    val restDaysThisMonth = remember(restDays, displayedMonth) {
+        (1..daysInMonth).count { day ->
+            val dateStr = displayedMonth.atDay(day).toString()
+            restDays.contains(dateStr)
+        }
+    }
+
+    // Effective denominator: total month days minus rest days, or completed days + rest days over total
+    // Treating rest days as valid lifestyle completions so rest days never ruin the monthly score:
+    val compliantDays = (completedDays + (1..daysInMonth).filter { day ->
+        restDays.contains(displayedMonth.atDay(day).toString())
+    }).distinct().size
+
+    val percentage = if (daysInMonth > 0) ((compliantDays * 100) / daysInMonth).coerceIn(0, 100) else 0
     val todayDate = if (displayedMonth == java.time.YearMonth.now()) java.time.LocalDate.now().dayOfMonth else -1
 
     GlassCard {
@@ -505,7 +510,7 @@ fun MonthlyProgressCard(completedWorkouts: List<WorkoutWithExercises>) {
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "${completedDays.size}/$daysInMonth",
+                        "$compliantDays/$daysInMonth",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -554,35 +559,66 @@ fun MonthlyProgressCard(completedWorkouts: List<WorkoutWithExercises>) {
                             if (cellIndex >= firstDayOffset && currentDay <= daysInMonth) {
                                 val cellDate = displayedMonth.atDay(currentDay)
                                 val dateStr = cellDate.toString()
-                                val isCompleted = completedDays.contains(currentDay)
+                                val workoutCount = workoutCountByDay[currentDay] ?: 0
+                                val isCompleted = workoutCount > 0
                                 val isToday = currentDay == todayDate
                                 val isRestDay = restDays.contains(dateStr)
                                 val isPastOrPresent = !cellDate.isAfter(java.time.LocalDate.now())
 
                                 Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            brush = if (isCompleted) CompletedBadgeGradient
-                                            else if (isRestDay) Brush.linearGradient(listOf(Color(0xFF38BDF8).copy(alpha = 0.25f), Color(0xFF0284C7).copy(alpha = 0.25f)))
-                                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent)),
-                                            shape = CircleShape
-                                        )
-                                        .clickable(enabled = isPastOrPresent) {
-                                            selectedRestDay = cellDate
-                                        },
+                                    modifier = Modifier.size(36.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = currentDay.toString(),
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isCompleted || isToday || isRestDay) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isCompleted) Color.White
-                                        else if (isToday) ElectricViolet
-                                        else if (isRestDay) ElectricCyan
-                                        else MaterialTheme.colorScheme.onSurface
-                                    )
+                                    // Base day circle
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                brush = if (isCompleted) CompletedBadgeGradient
+                                                else if (isRestDay) Brush.linearGradient(listOf(Color(0xFF38BDF8).copy(alpha = 0.25f), Color(0xFF0284C7).copy(alpha = 0.25f)))
+                                                else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent)),
+                                                shape = CircleShape
+                                            )
+                                            .clickable(enabled = isPastOrPresent) {
+                                                selectedRestDay = cellDate
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = currentDay.toString(),
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isCompleted || isToday || isRestDay) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isCompleted) Color.White
+                                            else if (isToday) ElectricViolet
+                                            else if (isRestDay) ElectricCyan
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    // Multi-workout "2x", "3x" miniature accent badge
+                                    if (workoutCount > 1) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 2.dp, y = (-2).dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(
+                                                    brush = Brush.horizontalGradient(
+                                                        listOf(ElectricViolet, ElectricCyan)
+                                                    )
+                                                )
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                text = "${workoutCount}x",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black,
+                                                lineHeight = 10.sp
+                                            )
+                                        }
+                                    }
                                 }
                                 currentDay++
                             }
